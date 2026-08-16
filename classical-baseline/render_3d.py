@@ -36,6 +36,7 @@ import pyvista as pv
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 pv.OFF_SCREEN = True
 

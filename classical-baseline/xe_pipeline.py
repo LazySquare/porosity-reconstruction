@@ -76,6 +76,7 @@ from skimage.io import imread
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 AIR_PAT = "hgxdh8ps94-1/Air/Air_%04d.png"
 XE_PAT = "hgxdh8ps94-1/Xenon_/Xe_%04d.png"
@@ -183,31 +184,63 @@ def calibrate(sample_zs, crop, denoise_mode, out_dir: Path) -> dict:
     I_quartz = float(cen[i] + 0.5 * (y0 - y2) / (y0 - 2 * y1 + y2) * (cen[1] - cen[0]))
     cum = np.cumsum(h_air) / h_air.sum() * 100.0
 
-    # Порог опорных пор подбирается АДАПТИВНО, а не фиксированным перцентилем.
-    # Фиксированный p1.5 работает, только если он попадает левее середины
-    # поровой популяции. Если разрешённой пористости мало или популяция пор
-    # узкая, порог рассекает её посередине, маска выходит крапчатой и 3D-эрозия
-    # не оставляет ни одного вокселя - калибровка падает. Синтетический тест
-    # (synthetic_test.py) ловит это, реальные данные случайно не задевали.
-    # Берём наименьший перцентиль, при котором внутренность ещё существует.
+    # Порог опорных пор задаётся ФИЗИКОЙ, а не долей объёма.
+    #
+    # Перцентиль здесь не работает в принципе. Он привязан к тому, СКОЛЬКО в
+    # образце разрешённых пор, а нужно попасть туда, ГДЕ они лежат по яркости.
+    # Если поровая популяция узкая, перцентиль рассекает её посередине: маска
+    # выходит крапчатой, 3D-эрозия не оставляет вокселей. Подбор перцентиля
+    # "пока хоть что-то не останется" эту беду не лечит, а маскирует: на
+    # тестовом фантоме он уезжал до p9, втягивал в опору микропористую глину и
+    # занижал dI100 на 23 %, то есть менял громкое падение на тихое смещение
+    # пористости на +3.5 п.п. (tests.py это ловит).
+    #
+    # Правильная привязка: сначала находим яркость самой тёмной фазы (это и
+    # есть I_pore), затем берём воксели с phi > 75 %, то есть лежащие в первой
+    # четверти пути от поры к кварцу. Такой порог не зависит от того, 3 % пор
+    # в образце или 15 %, и всегда захватывает поры ЦЕЛИКОМ, а не их случайные
+    # тёмные половинки - поэтому эрозия переживает его.
+    #
+    # Сухой скан перед пороговой обработкой обязательно денойзится: по сырым
+    # данным порог сидит в ~1 sigma от границы и дробит связные тела в крошку
+    # (diagnostics/check_segmentation.py: медианный объект 6 вокселей против 34).
     probe_zs = [sample_zs[len(sample_zs) // 4], sample_zs[len(sample_zs) // 2],
                 sample_zs[3 * len(sample_zs) // 4]]
-    probes = [read_block(AIR_PAT, z, crop) for z in probe_zs]
-    thr_dark, pct_used = None, None
-    for pct in (1.5, 2.5, 4.0, 6.0, 9.0, 13.0):
-        t = float(np.interp(pct, cum, cen))
+    probes = [ndi.median_filter(read_block(AIR_PAT, z, crop), size=3) for z in probe_zs]
+    I_dark = float(np.percentile(np.concatenate([p.ravel() for p in probes]), 0.1))
+    span = I_quartz - I_dark
+    if span < 400:
+        raise RuntimeError(
+            f"в образце не видно разрешённых пор: самая тёмная фаза ({I_dark:.0f}) "
+            f"отстоит от пика матрицы ({I_quartz:.0f}) всего на {span:.0f} единиц. "
+            f"Измерять dI100 не по чему - его придётся задать извне, из давления "
+            f"и состава газа.")
+
+    # Минимальные размеры опор масштабируются с площадью среза, а не заданы
+    # абсолютным числом: пороги, подобранные на срезах 900x900, на объёме
+    # 128x128 недостижимы просто из-за площади, и калибровка падала бы на
+    # исправных данных.
+    area = probes[0].shape[1] * probes[0].shape[2]
+    n_pore_min = max(60, int(3.0e-4 * area))
+    n_quartz_min = max(200, int(2.0e-2 * area))
+    n_dense_min = max(40, int(2.0e-4 * area))
+
+    thr_dark, frac_used = None, None
+    for frac in (0.25, 0.35, 0.50):          # phi > 75 %, > 65 %, > 50 %
+        t = I_dark + frac * span
         n = np.mean([int(ndi.binary_erosion(b < t, SE3)[1].sum()) for b in probes])
-        if n >= 200:
-            thr_dark, pct_used = t, pct
+        if n >= n_pore_min:
+            thr_dark, frac_used = t, frac
             break
     if thr_dark is None:
-        raise RuntimeError("не удалось найти опорные поры: после 3D-эрозии не "
-                           "остаётся вокселей ни при одном перцентиле до 13 %. "
-                           "Вероятно, в образце нет разрешённых пор - dI100 "
-                           "придётся задать извне.")
+        raise RuntimeError(
+            f"опорные поры есть, но все тоньше 3 вокселей: после 3D-эрозии их "
+            f"остаётся меньше {n_pore_min} на срез даже при пороге phi > 50 %. "
+            f"dI100 по таким данным измерить нельзя.")
     del probes
-    print(f"[A1] пик кварца: {I_quartz:.0f}    "
-          f"порог тёмного: {thr_dark:.0f} (перцентиль p{pct_used})")
+    print(f"[A1] пик кварца: {I_quartz:.0f}    I_dark: {I_dark:.0f}    "
+          f"порог опорных пор: {thr_dark:.0f} (phi > {100*(1-frac_used):.0f} %, "
+          f"{float(np.interp(thr_dark, cen, cum)):.1f} % объёма)")
 
     # --- A2: опорные измерения ----------------------------------------------
     q_dI, d_dI, p_dI, p_air, negs, npore = [], [], [], [], [], []
@@ -216,15 +249,19 @@ def calibrate(sample_zs, crop, denoise_mode, out_dir: Path) -> dict:
         x = read_block(XE_PAT, z, crop)
         dI = np.stack([denoise_slice(x[k] - a[k], denoise_mode) for k in range(3)])
 
+        # Маски строятся по ДЕНОЙЗЕННОМУ сухому скану той же медианой 3x3x3,
+        # что и порог: по сырым данным порог сидит в ~1 sigma от границы и
+        # режет связные тела в крошку, а эрозия затем стирает и её.
+        a_dn = ndi.median_filter(a, size=3)
         q = ndi.binary_erosion(np.abs(a - I_quartz) < 200, SE3)[1]
         dn = ndi.binary_erosion(a > 12000, SE3)[1]
-        p = ndi.binary_erosion(a < thr_dark, SE3)[1]
+        p = ndi.binary_erosion(a_dn < thr_dark, SE3)[1]
 
-        if q.sum() > 500:
+        if q.sum() > n_quartz_min:
             q_dI.append(float(np.median(dI[1][q])))
-        if dn.sum() > 200:
+        if dn.sum() > n_dense_min:
             d_dI.append(float(np.median(dI[1][dn])))
-        if p.sum() > 200:
+        if p.sum() > n_pore_min:
             p_dI.append(np.percentile(dI[1][p], 90))
             p_air.append(float(np.median(a[1][p])))
             npore.append(int(p.sum()))

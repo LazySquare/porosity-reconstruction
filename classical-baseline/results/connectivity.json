@@ -1,37 +1,37 @@
 [
   {
     "threshold": 50,
-    "vol_frac": 6.5314,
-    "n_clusters": 1760,
-    "largest_frac": 12.71793580640076,
+    "vol_frac": 6.577437037037037,
+    "n_clusters": 1756,
+    "largest_frac": 12.901850771548975,
     "percolates_z": false
   },
   {
     "threshold": 35,
-    "vol_frac": 13.49015925925926,
-    "n_clusters": 1578,
-    "largest_frac": 86.84939886221589,
+    "vol_frac": 13.546003703703704,
+    "n_clusters": 1580,
+    "largest_frac": 88.02612551303227,
     "percolates_z": true
   },
   {
     "threshold": 25,
-    "vol_frac": 20.40885925925926,
-    "n_clusters": 1424,
-    "largest_frac": 95.8606211681492,
+    "vol_frac": 20.461070370370372,
+    "n_clusters": 1418,
+    "largest_frac": 95.85186973854053,
     "percolates_z": true
   },
   {
     "threshold": 15,
-    "vol_frac": 30.79090740740741,
-    "n_clusters": 1315,
-    "largest_frac": 99.00381846733252,
+    "vol_frac": 30.83358888888889,
+    "n_clusters": 1312,
+    "largest_frac": 99.00332357605684,
     "percolates_z": true
   },
   {
     "threshold": 10,
-    "vol_frac": 38.61445555555555,
-    "n_clusters": 1435,
-    "largest_frac": 99.59080762596774,
+    "vol_frac": 38.67392592592593,
+    "n_clusters": 1445,
+    "largest_frac": 99.59592835061616,
     "percolates_z": true
   }
 ]

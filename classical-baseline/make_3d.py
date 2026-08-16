@@ -12,6 +12,7 @@
 которую мы измеряем.
 """
 import json
+import os
 import struct
 import sys
 
@@ -24,6 +25,7 @@ from skimage.measure import marching_cubes
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 SUB = 300           # ребро подкуба, вокселей (полное разрешение)
 VOXEL_UM = 3.0      # из статьи Ebadi et al.: spatial resolution 3 um/vox
@@ -31,6 +33,20 @@ VOXEL_UM = 3.0      # из статьи Ebadi et al.: spatial resolution 3 um/vo
 cal = json.load(open("results/calibration.json"))
 phi_mm = np.load("results/phi_map.npy", mmap_mode="r")
 nz, ny, nx = phi_mm.shape
+
+# Связность нельзя считать по прореженному объёму. Если phi-map получена с
+# --zstep > 1, воксели по z физически не соседи: при медианной поре в 4 вокселя
+# любое прореживание рвёт поровую сеть, и перколяционный анализ выдаст
+# уверенный, но неверный ответ. Проверка дешёвая, ошибка - молчаливая.
+stats_path = "results/stats.json"
+zs = json.load(open(stats_path))["zs"] if os.path.exists(stats_path) else None
+zstep = (zs[1] - zs[0]) if zs and len(zs) > 1 else 1
+if zstep != 1 or nz != ny or nz != nx:
+    raise SystemExit(
+        f"phi_map имеет форму {phi_mm.shape} при шаге по z = {zstep}.\n"
+        f"Связность и STL считаются только по полному изотропному объёму:\n"
+        f"прореживание по z склеивает несоседние срезы и рвёт поровую сеть.\n"
+        f"Перезапустите:  python xe_pipeline.py --stage all")
 z0, y0, x0 = (nz - SUB) // 2, (ny - SUB) // 2, (nx - SUB) // 2
 print(f"полная phi-карта: {phi_mm.shape}, подкуб {SUB}^3 из центра")
 phi = np.array(phi_mm[z0:z0 + SUB, y0:y0 + SUB, x0:x0 + SUB])

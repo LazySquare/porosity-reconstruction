@@ -32,6 +32,7 @@ from skimage.io import imread
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 AIR = "hgxdh8ps94-1/Air/Air_%04d.png"
 SUB = 200
